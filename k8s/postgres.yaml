@@ -1,0 +1,57 @@
+# Development-only Postgres for the minikube loop.
+#
+# Nothing here is durable — the pod's storage is emptyDir, so a
+# restart discards the cache.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: skycache-postgres
+stringData:
+  POSTGRES_DB: skycache
+  POSTGRES_USER: skycache
+  POSTGRES_PASSWORD: dev-only-not-a-secret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skycache-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: skycache-postgres
+  template:
+    metadata:
+      labels:
+        app: skycache-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17
+          envFrom:
+            - secretRef:
+                name: skycache-postgres
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "skycache", "-d", "skycache"]
+            initialDelaySeconds: 3
+            periodSeconds: 3
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: skycache-postgres
+spec:
+  selector:
+    app: skycache-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

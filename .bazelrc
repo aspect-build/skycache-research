@@ -1,0 +1,14 @@
+common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
+common --repo_env=BAZEL_NO_APPLE_CPP_TOOLCHAIN=1
+common --incompatible_strict_action_env=true
+common --@llvm//config:experimental_stub_libgcc_s=True
+
+common --@rules_rust//rust/settings:rustfmt.toml=//:rustfmt.toml
+
+common:opt --compilation_mode=opt
+
+# Container-backed tests need Docker on the host.
+test --test_env=DOCKER_HOST
+test --test_output=errors
+
+try-import %workspace%/user.bazelrc

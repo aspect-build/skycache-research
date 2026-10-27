@@ -1,0 +1,32 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# One patch per Bazel version, in a directory named for the release it targets. A patch is only
+# useful against the revision it was generated from, and nothing about a stale one looks wrong
+# until `git am` fails. Each test pins the two records of that revision to each other — the
+# `base-commit:` trailer the patch carries and its BAZEL_VERSION — and the directory name to both.
+#
+# A test per version rather than one over all of them, so a failure names the version.
+#
+# They deliberately do not clone Bazel: whether a patch still *applies* needs a checkout, which
+# `verify.sh <path>` does for whoever is rebasing it.
+
+VERSIONS = sorted([p.split("/")[0] for p in glob(["*/BAZEL_VERSION"])])
+
+[
+    sh_test(
+        name = "patch_base_test_" + version.replace(".", "_"),
+        size = "small",
+        srcs = ["verify.sh"],
+        args = [
+            "--only",
+            version,
+        ],
+        data = glob([version + "/*"]),
+    )
+    for version in VERSIONS
+]
+
+test_suite(
+    name = "patch_base_test",
+    tests = [":patch_base_test_" + version.replace(".", "_") for version in VERSIONS],
+)

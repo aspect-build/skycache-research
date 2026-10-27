@@ -1,0 +1,14 @@
+load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@rules_rust_prost//:defs.bzl", "rust_prost_library")
+
+proto_library(
+    name = "analysis_cache_proto",
+    srcs = ["analysis_cache.proto"],
+    visibility = ["//visibility:public"],
+)
+
+rust_prost_library(
+    name = "analysis_cache_rust_proto",
+    proto = ":analysis_cache_proto",
+    visibility = ["//visibility:public"],
+)

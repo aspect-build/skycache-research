@@ -1,0 +1,4 @@
+/bazel-*
+/user.bazelrc
+/target
+!/MODULE.bazel.lock

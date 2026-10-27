@@ -1,0 +1,194 @@
+load("@aspect_bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_load")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_lint_config")
+
+exports_files([
+    "Cargo.lock",
+    "Cargo.toml",
+    "rustfmt.toml",
+])
+
+rust_lint_config(
+    name = "lint_config",
+    clippy = {
+        "expect_used": "deny",
+        "unwrap_used": "deny",
+    },
+)
+
+rust_library(
+    name = "lib",
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/main.rs"],
+    ),
+    crate_name = "skycache",
+    lint_config = ":lint_config",
+    deps = [
+        "//proto:analysis_cache_rust_proto",
+        "@crate_index//:axum",
+        "@crate_index//:base64",
+        "@crate_index//:bb8",
+        "@crate_index//:bytes",
+        "@crate_index//:diesel",
+        "@crate_index//:diesel-async",
+        "@crate_index//:futures",
+        "@crate_index//:http",
+        "@crate_index//:hyper",
+        "@crate_index//:jsonwebtoken",
+        "@crate_index//:miette",
+        "@crate_index//:opentelemetry",
+        "@crate_index//:opentelemetry-otlp",
+        "@crate_index//:opentelemetry_sdk",
+        "@crate_index//:reqwest",
+        "@crate_index//:rustls",
+        "@crate_index//:serde",
+        "@crate_index//:serde_json",
+        "@crate_index//:tokio",
+        "@crate_index//:tokio-postgres",
+        "@crate_index//:tokio-postgres-rustls",
+        "@crate_index//:tonic",
+        "@crate_index//:tonic-health",
+        "@crate_index//:tower",
+        "@crate_index//:tracing",
+        "@crate_index//:tracing-subscriber",
+        "@crate_index//:uuid",
+    ],
+)
+
+rust_test(
+    name = "lib_test",
+    size = "small",
+    crate = ":lib",
+    lint_config = ":lint_config",
+)
+
+# Both run Postgres under testcontainers, so they need Docker and network access on the host.
+rust_test(
+    name = "store_test",
+    size = "large",
+    srcs = ["tests/store.rs"],
+    crate_root = "tests/store.rs",
+    lint_config = ":lint_config",
+    tags = [
+        "exclusive",
+        "requires-network",
+    ],
+    deps = [
+        ":lib",
+        "@crate_index//:diesel",
+        "@crate_index//:diesel-async",
+        "@crate_index//:miette",
+        "@crate_index//:testcontainers",
+        "@crate_index//:testcontainers-modules",
+        "@crate_index//:tokio",
+        "@crate_index//:uuid",
+    ],
+)
+
+rust_test(
+    name = "service_test",
+    size = "large",
+    srcs = ["tests/service.rs"],
+    crate_root = "tests/service.rs",
+    lint_config = ":lint_config",
+    tags = [
+        "exclusive",
+        "requires-network",
+    ],
+    deps = [
+        ":lib",
+        "//proto:analysis_cache_rust_proto",
+        "@crate_index//:jsonwebtoken",
+        "@crate_index//:miette",
+        "@crate_index//:serde_json",
+        "@crate_index//:testcontainers",
+        "@crate_index//:testcontainers-modules",
+        "@crate_index//:tokio",
+        "@crate_index//:tokio-stream",
+        "@crate_index//:tonic",
+        "@crate_index//:tower",
+        "@crate_index//:wiremock",
+    ],
+)
+
+rust_binary(
+    name = "skycache",
+    srcs = ["src/main.rs"],
+    lint_config = ":lint_config",
+    deps = [
+        ":lib",
+        "//proto:analysis_cache_rust_proto",
+        "@crate_index//:clap",
+        "@crate_index//:miette",
+        "@crate_index//:tokio",
+        "@crate_index//:tonic",
+        "@crate_index//:tonic-health",
+        "@crate_index//:tower",
+        "@crate_index//:tracing",
+    ],
+)
+
+# Static musl binaries, so the image does not depend on the build host's glibc.
+IMAGE_PLATFORMS = {
+    "amd64": ("x86_64-unknown-linux-musl", "@distroless_cc_linux_amd64", "@platforms//cpu:x86_64"),
+    "arm64": ("aarch64-unknown-linux-musl", "@distroless_cc_linux_arm64", "@platforms//cpu:arm64"),
+}
+
+[
+    platform_transition_filegroup(
+        name = "skycache_" + arch,
+        srcs = [":skycache"],
+        tags = ["manual"],
+        target_platform = "@rules_rs//rs/platforms:" + triple,
+    )
+    for arch, (triple, _, _) in IMAGE_PLATFORMS.items()
+]
+
+[
+    pkg_tar(
+        name = "image_layer_" + arch,
+        srcs = [":skycache_" + arch],
+        tags = ["manual"],
+    )
+    for arch in IMAGE_PLATFORMS
+]
+
+[
+    oci_image(
+        name = "image_" + arch,
+        base = base,
+        entrypoint = ["/skycache"],
+        tags = ["manual"],
+        tars = [":image_layer_" + arch],
+    )
+    for arch, (_, base, _) in IMAGE_PLATFORMS.items()
+]
+
+oci_image_index(
+    name = "image",
+    images = [":image_" + arch for arch in IMAGE_PLATFORMS],
+    tags = ["manual"],
+)
+
+oci_load(
+    name = "image.load",
+    image = select({
+        cpu: ":image_" + arch
+        for arch, (_, _, cpu) in IMAGE_PLATFORMS.items()
+    }),
+    repo_tags = ["skycache:latest"],
+    tags = ["manual"],
+)
+
+# Skaffold's Bazel builder rejects any target whose name does not end in `.tar`.
+filegroup(
+    name = "image.load.tar",
+    srcs = [":image.load"],
+    output_group = "tarball",
+    tags = ["manual"],
+)
