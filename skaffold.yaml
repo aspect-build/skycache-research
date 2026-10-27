@@ -1,0 +1,28 @@
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: skycache
+build:
+  artifacts:
+    # Skaffold's own Bazel builder. It locates the tarball with `bazel cquery`, so the target must
+    # be the `.tar` filegroup over oci_load's tarball output group rather than the image itself.
+    - image: skycache
+      bazel:
+        target: //:image.load.tar
+  local:
+    # The tarball is loaded straight into the Docker daemon. Point the daemon at minikube first
+    # (`eval $(minikube docker-env)`) so the cluster can see it without a registry.
+    push: false
+  tagPolicy:
+    sha256: {}
+manifests:
+  rawYaml:
+    - k8s/postgres.yaml
+    - k8s/skycache.yaml
+deploy:
+  kubectl: {}
+portForward:
+  - resourceType: service
+    resourceName: skycache
+    port: 50051
+    localPort: 50051

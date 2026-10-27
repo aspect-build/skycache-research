@@ -1,0 +1,12 @@
+# The bazelbuild/bazel revision this patch applies to.
+#
+# The patch carries the same commit as a `base-commit:` trailer, which is what `git am --3way`
+# reads; this file is the greppable form, and `verify.sh` checks the two still agree. A patch whose
+# base is not recorded is a patch nobody can tell is stale.
+#
+# Changing these means re-running `verify.sh` against the new revision: the patch touches
+# RemoteAnalysisCachingOptions, FileDependencySerializer and SerializationModule, all of which moved
+# between 9.3.1 and master.
+
+BAZEL_RELEASE=9.3.1
+BAZEL_COMMIT=fee2bf2d1c14bc2096068a4d46f1842472092044

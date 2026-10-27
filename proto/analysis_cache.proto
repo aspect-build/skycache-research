@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package skycache.v1;
+
+// Bazel is the only Java consumer; these keep the generated stub names sane.
+option java_package = "build.aspect.skycache.v1";
+option java_multiple_files = true;
+
+// Storage for Bazel's serialized Skyframe analysis graph.
+//
+// Bazel addresses entries by a 16-byte non-cryptographic fingerprint it computes itself, so this
+// service never hashes anything: it stores what it is given under the key it is given, and returns
+// it byte for byte. Nothing here parses a value.
+service AnalysisCache {
+  // Fetches entries. A key with no entry is omitted from the response; Bazel reads an absent or
+  // empty value as "not cached" and evaluates locally.
+  rpc Get(GetRequest) returns (GetResponse);
+
+  // Stores entries. Writing a key that already exists is a no-op, because the key is a fingerprint
+  // of the value and an upload re-sends entries other builds have already contributed.
+  rpc Put(PutRequest) returns (PutResponse);
+}
+
+// The tenant a request is served under is resolved by the service from the caller's credentials.
+// It is deliberately not on the wire: a client that could name a tenant could name someone else's.
+// Nothing else needs separating, because Bazel's FrontierNodeVersion already salts every top-level
+// key with the Bazel install hash and the top-level configuration checksum, and shared values are
+// addressed by a fingerprint of bytes the codec registry produced.
+message GetRequest {
+  repeated bytes keys = 1;
+}
+
+message GetResponse {
+  repeated Entry entries = 1;
+}
+
+message PutRequest {
+  repeated Entry entries = 1;
+}
+
+message PutResponse {
+  // Entries the server had not already stored. Lets a client see its deduplication rate without a
+  // second round trip.
+  int64 stored = 1;
+}
+
+message Entry {
+  bytes key = 1;
+
+  // The entry exactly as Bazel serialized it, on the way in and on the way out. It carries a header
+  // identifying the invalidation data in front of the value, which one of Bazel's two read paths
+  // removes and the other does not; the client owns that distinction, because a nested shared value
+  // has no header and a server stripping unconditionally would eat its first bytes.
+  bytes value = 2;
+}

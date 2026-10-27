@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skycache
+  labels:
+    app: skycache
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: skycache
+  template:
+    metadata:
+      labels:
+        app: skycache
+    spec:
+      containers:
+        - name: skycache
+          image: skycache:latest
+          # Loaded directly into the node's daemon by oci_load; there is no registry to pull from.
+          imagePullPolicy: IfNotPresent
+          args:
+            - --listen
+            - 0.0.0.0:50051
+            # Analysis entries are never invalidated; see the patch README.
+            - --accept-unsound-invalidation
+          env:
+            # Replace with the issuer that mints the tokens your credential helper supplies; the
+            # pod will not start against this placeholder. Naming the wrong issuer refuses every
+            # real token, which looks like a broken client rather than a misconfigured server.
+            # There is no local stand-in: the tenant comes from a verified claim, and nothing
+            # unverified may supply one.
+            - name: SKYCACHE_OIDC_ISSUERS
+              value: https://issuer.invalid
+            - name: SKYCACHE_DB_ENDPOINT
+              value: skycache-postgres:5432
+            - name: SKYCACHE_DB_USER
+              value: skycache
+            - name: SKYCACHE_DB_NAME
+              value: skycache
+            - name: SKYCACHE_DB_SSL_MODE
+              value: disable
+            - name: PGPASSWORD
+              value: dev-only-not-a-secret
+            - name: RUST_LOG
+              value: info
+          ports:
+            - name: grpc
+              containerPort: 50051
+          # grpc_health_probe is not in the image, so both probes use the TCP socket: the process
+          # only binds once Postgres has answered, which is the condition worth gating on.
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: skycache
+spec:
+  selector:
+    app: skycache
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+      nodePort: 30051
+  # NodePort, not ClusterIP: an upload pushes hundreds of thousands of entries, and
+  # `kubectl port-forward` multiplexes everything onto one connection that drops under that load.
+  # Reach the service directly at $(minikube ip):30051 instead.
+  type: NodePort
